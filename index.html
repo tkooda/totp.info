@@ -62,7 +62,8 @@ function leftpad(str, len, pad) {
 };
 
 
-function updateOtp() { // uses global "secret"
+// working: http://jsfiddle.net/russau/ch8PK/
+function updateOtp( secret ) {
     var epoch = Math.round(new Date().getTime() / 1000.0);
     var time = leftpad(dec2hex(Math.floor(epoch / 30)), 16, '0');
     var shaObj = new jsSHA("SHA-1", "HEX");
@@ -70,7 +71,7 @@ function updateOtp() { // uses global "secret"
     shaObj.update(time);
     var hmac = shaObj.getHMAC("HEX");
     
-//    $('#qrImg').attr('src', 'https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=200x200&chld=M|0&cht=qr&chl=otpauth://totp/user@host.com%3Fsecret%3D' + $('#secret').val());  // FIXME: possible future feature: allow displaying QR code of secret, to aide in adding to Google Authenticator apps
+//    $('#qrImg').attr('src', 'https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=200x200&chld=M|0&cht=qr&chl=otpauth://totp/user@host.com%3Fsecret%3D' + $('#secretInput').val());  // FIXME: possible future feature: allow displaying QR code of secret, to aide in adding to Google Authenticator apps
     
     if (hmac == 'KEY MUST BE IN BYTE INCREMENTS') {
         document.getElementById("message").value = hmac; // error message
@@ -80,14 +81,13 @@ function updateOtp() { // uses global "secret"
     
     var otp = (hex2dec(hmac.substr(offset * 2, 8)) & hex2dec('7fffffff')) + '';
     otp = (otp).substr(otp.length - 6, 6);
-    
+
     document.getElementById("otp").innerHTML = otp.substr(0,3) + " " + otp.substr(3,3);
 };
 
 
 function isValidSecret( s ) {
-  if ( !/^[A-Z2-7]+$/.test( s ) ) {
-//console.log("isValidSecret() bad regex: " + s );
+  if ( !/^[a-zA-Z2-7]+$/.test( s ) ) { // only allow base32
     return false;
   }
   var epoch = Math.round(new Date().getTime() / 1000.0);
@@ -96,31 +96,75 @@ function isValidSecret( s ) {
   shaObj.setHMACKey( base32tohex(s), "HEX");
   shaObj.update(time);
   var hmac = shaObj.getHMAC("HEX");
-//console.log("isValidSecret() hmac: " + hmac );
   
   return (hmac != "KEY MUST BE IN BYTE INCREMENTS");
 };
 
 
-function loadSecret() {
-  secret = document.getElementById("secret").value.replace(/-|\s/g,""); // strip leading "#", and any spaces/dashes used for pretty formatting
+// this sets/unsets any error message..
+function getValidSecretFromFragment() {
+  if ( window.location.hash ) {
+    var secret = window.location.hash.substring( 1 ).replace(/-|\s/g,""); // strip leading "#", and any spaces/dashes used for pretty formatting
+    
+    if ( isValidSecret( secret ) ) {
+      
+      // clear any previous error message..
+      document.getElementById("message").innerHTML = "";
+      document.getElementById("message").style.visibility = "hidden";
+      
+      return secret.toUpperCase();
+    }
+    
+    document.getElementById("message").innerHTML = "Invalid Key: " + secret; // invalid fragment exists! show error
+  }
   
-  if ( ! isValidSecret( secret ) ) {
+  return undefined;
+};
+
+
+// this sets/unsets any error message..
+function getValidSecretFromForm() {
+  var secret = document.getElementById("secretInput").value.replace(/-|\s/g,""); // strip leading "#", and any spaces/dashes used for pretty formatting
+  
+  if ( secret.length > 0 ) {
+    
+    if ( isValidSecret( secret ) ) {
+      
+      // clear any previous error message..
+      document.getElementById("message").innerHTML = "";
+      document.getElementById("message").style.visibility = "hidden";
+      
+      return secret.toUpperCase();
+    }
+    
+    document.getElementById("message").innerHTML = "Invalid Key: " + secret; // unable to get valid secret from non-empty form input.  show error
+  }
+  
+  return undefined;
+};
+
+
+
+function loadSecret() {
+  var secret = getValidSecretFromForm();
+  
+  if ( ! secret ) {
     document.getElementById("message").innerHTML = "Invalid Key: " + secret; // show error
     return false;
   }
-
-  // clear error message..
+  
+  // clear any previous error message..
   document.getElementById("message").innerHTML = "";
   document.getElementById("message").style.visibility = "hidden";
-
+  
   // put valid secret into URL fragment (after "#"), but without refreshing the page
   window.location.hash = secret
-  
+
+  // hide form and show totp code + timer..
   document.getElementById("totpform").style.visibility = "hidden";
   document.getElementById("totpcode").style.visibility = "visible";
-
-  updateOtp();
+  
+  updateOtp( secret );
   setupTimer();
 };
 
@@ -154,53 +198,61 @@ function generateSecret() {
 function setRandomSecret() {
   do {
     var tmp_secret = generateSecret();
-  } while ( ! isValidSecret( tmp_secret ) );  // FIXME: this sometimes fails to generate valid secret for some reason, fix and remove while loop later to improve performance
+  } while ( ! isValidSecret( tmp_secret ) );  // FIXME: this sometimes fails to generate valid secret for some reason (likely size), fix and remove while loop later to improve performance
   
-  document.getElementById("secret").value = tmp_secret;
+  document.getElementById("secretInput").value = tmp_secret;
 };
 
 
 // https://codepen.io/lambdacreatives/pen/uygzk
-function setupTimer() {
+function setupTimer( secret ) {
   var countdownNumberEl = document.getElementById('countdown-number');
-
+  
   var epoch = Math.round(new Date().getTime() / 1000.0);
   var countdown = 30 - (epoch % 30); // start counting down at actual remaining time based on epoch
-
-  document.getElementById("circle").style.animation = "countdown " + countdown + "s linear infinite forwards"; // only possibly set timer to sub 30 seconds for initial viewing
-
+  
+  // overwriting this svg with a clone is required to get correct animation..
+  document.getElementById("circlesvg").replaceWith( svgUnmodifiedClone ); // reset SVG to clone that displays timer coutdown from original 30s (only way to get svg that's been previously altered with a shorter animation time to reset properly to be the longer animation time AND restart at the first position)
+document.getElementById("circle").style.animation = "countdown " + countdown + "s linear infinite forwards"; // only possibly set timer to sub 30 seconds for initial viewing
+  
   countdownNumberEl.textContent = countdown;
   
   setInterval(function() {
-
+    
     countdown = --countdown <= 0 ? 30 : countdown;
     countdownNumberEl.textContent = countdown;
-
+    
     if (countdown >= 30) {
 
       document.getElementById("circlesvg").replaceWith( svgUnmodifiedClone ); // reset SVG to clone that displays timer coutdown from original 30s (only way to get svg that's been previously altered with a shorter animation time to reset properly to be the longer animation time AND restart at the first position)
+      document.getElementById("circle").style.animation = "countdown 30s linear infinite forwards"; // FIXME: possibly unnessicary?
 
-      updateOtp();
+      var secret = getValidSecretFromFragment();
+      if ( secret ) {
+        updateOtp( secret );
+      }
+
     }
 
   }, 1000);
-}
+};
 
 
 function doMain() {
-  if ( window.location.hash ) {
-    var secret = window.location.hash.substring( 1 ).replace(/-|\s/g,""); // strip leading "#", and any spaces/dashes used for pretty formatting
-    if ( isValidSecret( secret ) ) {
-      document.getElementById("totpcode").style.visibility = "visible"; // show TOTP code
-      updateOtp();
-      setupTimer();
-    } else {
-      document.getElementById("message").innerHTML = "Invalid Key: " + secret; // show error
-      document.getElementById("totpform").style.visibility = "visible"; // show form
-    }
-  } else {
+  var secret = getValidSecretFromFragment();
+
+  if ( secret ) {
+    
+    document.getElementById("totpcode").style.visibility = "visible"; // show TOTP code
+    updateOtp( secret );
+    setupTimer( secret );
+
+  } else { // no valid secret in fragment..
+
     document.getElementById("totpform").style.visibility = "visible"; // show form
+    
   }
+
 };
 
 </script>
@@ -209,7 +261,7 @@ function doMain() {
 <style>
 html, body {height:100%;}
 html {display:table; width:100%;}
-body {display:table-cell; text-align:center; vertical-align:middle;}
+body {display:table-cell; text-align:center; }
 
 #wording {
     font-family: wes-fy,lato,"helvetica neue",helvetica,arial;
@@ -219,7 +271,7 @@ body {display:table-cell; text-align:center; vertical-align:middle;}
     color: #202d4a;
 }
 
-#secret, #otp {
+#secretInput, #otp {
     font-family: 'Roboto Mono',Monaco,'Courier New',monospace;
     text-transform: uppercase;
     font-size: 30px;
@@ -241,6 +293,13 @@ body {display:table-cell; text-align:center; vertical-align:middle;}
 
 input:focus{
     outline: none;
+}
+
+#topcorner{
+    position:absolute;
+    top:10px;
+    right: 10px;
+    font-size: 75%;
 }
 
 </style>
@@ -293,12 +352,13 @@ svg circle {
 </head>
 <body>
 
+<div id="topcorner"><a href="https://github.com/tkooda/totp.info">About</a></div>
 
 <span id="totpform" style="visibility: hidden">
   <div id="message"></div>
 
   <div><span id="wording">Enter a TOTP Secret Key (Base32):</span></div>
-  <div><input type="text" id="secret"></div>
+  <div><input type="text" id="secretInput"></div>
   <br/>
   <div><span><button onclick="setRandomSecret()">Generate new key</button> or <button onclick="loadSecret()">Use this key</button></span></div>
 </span>
