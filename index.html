@@ -93,11 +93,15 @@ function isValidSecret( s ) {
   var epoch = Math.round(new Date().getTime() / 1000.0);
   var time = leftpad(dec2hex(Math.floor(epoch / 30)), 16, '0');
   var shaObj = new jsSHA("SHA-1", "HEX");
-  shaObj.setHMACKey( base32tohex(s), "HEX");
-  shaObj.update(time);
-  var hmac = shaObj.getHMAC("HEX");
+  try {
+    shaObj.setHMACKey( base32tohex(s), "HEX");
+    shaObj.update(time);
+    var hmac = shaObj.getHMAC("HEX");
   
-  return (hmac != "KEY MUST BE IN BYTE INCREMENTS");
+    return (hmac != "KEY MUST BE IN BYTE INCREMENTS");
+  } catch(err) {
+    return false; // e.g. HEX string 's' not actually in byte increments, try again..
+  }
 };
 
 
@@ -188,7 +192,7 @@ function getRandomByte( max = 256 ) {
 function generateSecret() {
     var charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     var key = "";
-    for ( var i = 0; i < 16; i++ ) {
+    for ( var i = 0; i < 24; i++ ) {
         key += charset.charAt( getRandomByte( charset.length ) );
     }
     return key;
@@ -280,6 +284,7 @@ body {display:table-cell; text-align:center; }
     line-height: 40px;
     border-radius: 5px;
     font-weight: 900;
+    width: 500px;
 }
 
 #otp {
